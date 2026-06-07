@@ -40,9 +40,10 @@
       --cat-note: #4a4a6b;
     }
 
-    html, body { height: 100%; background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+    html { height: 100%; height: 100dvh; }
+    body { height: 100%; height: 100dvh; background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
 
-    #app { display: flex; flex-direction: column; height: 100%; max-width: 480px; margin: 0 auto; background: var(--cream); position: relative; }
+    #app { display: flex; flex-direction: column; height: 100%; height: 100dvh; max-width: 480px; margin: 0 auto; background: var(--cream); position: relative; overflow: hidden; }
 
     /* ── HEADER ── */
     .header {
@@ -81,7 +82,7 @@
     .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
 
     /* ── SCROLL ── */
-    .scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: max(env(safe-area-inset-bottom), 80px); }
+    .scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: max(env(safe-area-inset-bottom), 80px); }
     .scroll::-webkit-scrollbar { width: 2px; }
     .scroll::-webkit-scrollbar-thumb { background: var(--surface3); }
 
@@ -960,7 +961,8 @@ function renderSettings() {
         Get a free Client ID at <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a><br/>
         → New Project → APIs &amp; Services → Credentials<br/>
         → Create OAuth 2.0 Client ID → Web Application<br/>
-        → Add your GitHub Pages URL as Authorized redirect URI
+        → Add your site's origin (e.g. <code>https://yoursite.github.io</code>) to <strong>Authorised JavaScript origins</strong><br/>
+        No redirect URI needed with this method.
       </div>`;
   }
 
@@ -1117,19 +1119,41 @@ function clearGToken() { localStorage.removeItem('voyage_gtoken'); localStorage.
 function getGClientId() { return localStorage.getItem('voyage_gclient_id') || ''; }
 function setGClientId(id) { localStorage.setItem('voyage_gclient_id', id.trim()); }
 
+let _gisTokenClient = null;
+
 function connectGoogleDrive() {
   const clientId = getGClientId();
   if (!clientId) { showToast('Enter your Google Client ID first'); return; }
-  const redirectUri = window.location.origin + window.location.pathname;
-  const scope = 'https://www.googleapis.com/auth/drive.appdata';
-  const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=token&scope=' + encodeURIComponent(scope) + '&prompt=consent';
-  window.location.href = url;
+
+  // Use Google Identity Services token model (works with all current OAuth client IDs)
+  if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+    showToast('Google sign-in library not loaded yet — try again in a moment');
+    return;
+  }
+
+  _gisTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: 'https://www.googleapis.com/auth/drive.appdata',
+    callback: function(tokenResponse) {
+      if (tokenResponse.error) {
+        showToast('Google Drive connection failed: ' + tokenResponse.error);
+        return;
+      }
+      const expiresIn = parseInt(tokenResponse.expires_in || '3600');
+      localStorage.setItem('voyage_gtoken', tokenResponse.access_token);
+      localStorage.setItem('voyage_gtoken_expiry', String(Date.now() + expiresIn * 1000));
+      showToast('\u2713 Google Drive connected!');
+      renderSettings();
+      triggerBackup();
+    }
+  });
+  _gisTokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
 function handleOAuthCallback() {
+  // Legacy hash-based callback — kept as fallback but GIS flow above is primary
   const hash = window.location.hash;
   if (!hash.includes('access_token')) return;
-  // Clear the hash immediately to prevent freeze on reload
   window.history.replaceState({}, '', window.location.pathname);
   try {
     const params = new URLSearchParams(hash.slice(1));
