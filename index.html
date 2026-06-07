@@ -335,17 +335,17 @@
   </style>
 
   <script>
-    const _manifest = {"name": "Voyage \u2014 Travel Tracker", "short_name": "Voyage", "description": "Track flights, hotels, car rentals, activities, and travel notes", "start_url": ".", "display": "standalone", "background_color": "#0a0e1a", "theme_color": "#0a0e1a", "orientation": "portrait"};
-    const _mBlob = new Blob([JSON.stringify(_manifest)], {type:'application/json'});
-    const _mUrl = URL.createObjectURL(_mBlob);
-    const _mLink = document.createElement('link');
-    _mLink.rel = 'manifest'; _mLink.href = _mUrl;
-    document.head.appendChild(_mLink);
-    const _swCode = `const CACHE='voyage-v1';self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{self.clients.claim()});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});`;
-    if ('serviceWorker' in navigator) {
-      const _swBlob = new Blob([_swCode], {type:'text/javascript'});
-      navigator.serviceWorker.register(URL.createObjectURL(_swBlob)).catch(()=>{});
-    }
+    (function() {
+      var m = {"name": "Voyage \u2014 Travel Tracker", "short_name": "Voyage", "description": "Track flights, hotels, car rentals, activities, and travel notes", "start_url": ".", "display": "standalone", "background_color": "#0a0e1a", "theme_color": "#0a0e1a", "orientation": "portrait"};
+      var l = document.createElement('link');
+      l.rel = 'manifest';
+      l.href = URL.createObjectURL(new Blob([JSON.stringify(m)], {type:'application/json'}));
+      document.head.appendChild(l);
+      if ('serviceWorker' in navigator) {
+        var sw = 'const C="voyage-v2";self.addEventListener("install",function(e){self.skipWaiting()});self.addEventListener("activate",function(e){self.clients.claim()});self.addEventListener("fetch",function(e){e.respondWith(fetch(e.request).catch(function(){return caches.match(e.request)}));});';
+        navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], {type:'text/javascript'}))).catch(function(){});
+      }
+    })();
   </script>
 </head>
 <body>
@@ -926,92 +926,322 @@ function renderSettings() {
   const el = document.getElementById('tab-settings');
   const key = getApiKey();
   const masked = key ? key.slice(0, 12) + '••••••••••••' + key.slice(-4) : '';
+  const connected = isGTokenValid();
+  const clientId = getGClientId();
 
-  el.innerHTML = `<div class="pad">
-    <div class="section-head" style="margin-bottom:20px">
-      <div class="section-title">⚙️ Settings</div>
-    </div>
+  // Build backup section separately to avoid nesting issues
+  let backupStatusHtml = '';
+  if (connected) {
+    const timeStr = lastBackupTime ? lastBackupTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+    backupStatusHtml = '<div class="backup-status synced">✓ Backed up ' + timeStr + '</div>';
+  } else {
+    backupStatusHtml = '<div class="backup-status disconnected">☁️ Not connected to Google Drive</div>';
+  }
 
-    <div class="settings-section">
-      <div class="settings-section-title">AI Email Import</div>
-      <div style="padding:14px 16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div style="font-size:14px;font-weight:500">Google Gemini API Key</div>
-          <span class="key-status ${key ? 'set' : 'unset'}">${key ? '✓ Key saved' : '✗ Not set'}</span>
-        </div>
-        ${key ? `
-          <div style="font-size:13px;color:var(--text3);font-family:monospace;background:var(--surface2);padding:8px 12px;border-radius:6px;margin-bottom:10px;letter-spacing:0.5px">${masked}</div>
-          <div style="display:flex;gap:8px">
-            <button class="clear-key-btn" onclick="clearApiKeySetting()">🗑 Remove Key</button>
-            <button style="background:transparent;border:1px solid var(--surface3);color:var(--text2);font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="document.getElementById('replace-key-wrap').style.display='block'">Replace</button>
-          </div>
-          <div id="replace-key-wrap" style="display:none;margin-top:12px">
-            <input class="api-key-input" id="api-key-field" type="password" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false"/>
-            <button class="save-key-btn" onclick="saveApiKey()">Save New Key</button>
-          </div>
-        ` : `
-          <input class="api-key-input" id="api-key-field" type="password" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false"/>
-          <button class="save-key-btn" onclick="saveApiKey()">Save API Key</button>
-          <div class="key-hint">
-            Get a <strong>free</strong> key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a><br/>
-            → Sign in with Google → Create API Key → Copy it<br/>
-            No credit card. No billing. Completely free.<br/><br/>
-            The key is saved <strong>only on this device</strong> and never sent anywhere except directly to Google when you import an email.
-          </div>
-        `}
+  let backupActionHtml = '';
+  if (connected) {
+    backupActionHtml = `
+      <button class="gdrive-btn disconnect" onclick="clearGToken();backupStatus='disconnected';renderSettings()">✕ Disconnect Google Drive</button>
+      <button class="restore-btn" onclick="restoreFromDrive()">⬇️ Restore from Backup</button>`;
+  } else if (clientId) {
+    backupActionHtml = `
+      <button class="gdrive-btn connect" onclick="connectGoogleDrive()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Connect Google Drive
+      </button>`;
+  } else {
+    backupActionHtml = `
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">Auto-backup encrypts your trip data and saves it privately to your Google Drive. Requires a free Google OAuth Client ID (one-time setup).</div>
+      <div class="form-field">
+        <label class="form-label">Google OAuth Client ID</label>
+        <input class="api-key-input" id="gclient-id-field" type="text" placeholder="xxxx.apps.googleusercontent.com" value="${clientId}"/>
+        <button class="save-key-btn" style="margin-top:8px" onclick="setGClientId(document.getElementById('gclient-id-field').value);renderSettings();showToast('Saved!')">Save Client ID</button>
       </div>
-    </div>
+      <div class="key-hint">
+        Get a free Client ID at <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a><br/>
+        → New Project → APIs &amp; Services → Credentials<br/>
+        → Create OAuth 2.0 Client ID → Web Application<br/>
+        → Add your GitHub Pages URL as Authorized redirect URI
+      </div>`;
+  }
 
-    <div class="settings-section">
-      <div class="settings-section-title">Cloud Backup — Google Drive</div>
-      <div style="padding:14px 16px">
-        <div id="backup-status-indicator" class="backup-status ${isGTokenValid() ? (backupStatus==='syncing'?'syncing':'synced') : 'disconnected'}">${isGTokenValid() ? (backupStatus==='syncing' ? '<div class=\'backup-spin\'></div> Saving to Drive…' : '✓ Backed up ' + (lastBackupTime ? lastBackupTime.toLocaleTimeString([],{hour:\'2-digit\',minute:\'2-digit\'}) : '')) : '☁️ Not connected'}</div>
-        ${isGTokenValid() ? `
-          <button class="gdrive-btn disconnect" onclick="clearGToken();backupStatus='disconnected';renderSettings();">✕ Disconnect Google Drive</button>
-          <button class="restore-btn" onclick="restoreFromDrive()">⬇️ Restore from Backup</button>
-        ` : getGClientId() ? `
-            <button class="gdrive-btn connect" onclick="connectGoogleDrive()">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-              Connect Google Drive
-            </button>
-        ` : `
-            <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">Auto-backup encrypts your trip data and saves it privately to your Google Drive. Requires a free Google OAuth Client ID (one-time setup).</div>
-            <div class="form-field">
-              <label class="form-label">Google OAuth Client ID</label>
-              <input class="api-key-input" id="gclient-id-field" type="text" placeholder="xxxx.apps.googleusercontent.com" value="${getGClientId()}"/>
-              <button class="save-key-btn" style="margin-top:8px" onclick="setGClientId(document.getElementById('gclient-id-field').value);renderSettings();showToast('Saved!')">Save Client ID</button>
-            </div>
-            <div class="key-hint">
-              Get a free Client ID at <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a><br/>
-              → New Project → APIs &amp; Services → Credentials<br/>
-              → Create OAuth 2.0 Client ID → Web Application<br/>
-              → Add your GitHub Pages URL as Authorized redirect URI
-            </div>
-        `}
+  // Build API key section
+  let apiKeyHtml = '';
+  if (key) {
+    apiKeyHtml = `
+      <div style="font-size:13px;color:var(--text3);font-family:monospace;background:var(--surface2);padding:8px 12px;border-radius:6px;margin-bottom:10px;letter-spacing:0.5px">${masked}</div>
+      <div style="display:flex;gap:8px">
+        <button class="clear-key-btn" onclick="clearApiKeySetting()">🗑 Remove Key</button>
+        <button style="background:transparent;border:1px solid var(--surface3);color:var(--text2);font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="document.getElementById('replace-key-wrap').style.display='block'">Replace</button>
       </div>
-    </div>
+      <div id="replace-key-wrap" style="display:none;margin-top:12px">
+        <input class="api-key-input" id="api-key-field" type="password" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false"/>
+        <button class="save-key-btn" onclick="saveApiKey()">Save New Key</button>
+      </div>`;
+  } else {
+    apiKeyHtml = `
+      <input class="api-key-input" id="api-key-field" type="password" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false"/>
+      <button class="save-key-btn" onclick="saveApiKey()">Save API Key</button>
+      <div class="key-hint">
+        Get a <strong>free</strong> key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a><br/>
+        → Sign in with Google → Create API Key → Copy it<br/>
+        No credit card. No billing. Completely free.<br/><br/>
+        The key is saved <strong>only on this device</strong> and never sent anywhere except directly to Google when you import an email.
+      </div>`;
+  }
 
-    <div class="settings-section">
-      <div class="settings-section-title">About</div>
-      <div class="settings-row">
-        <div class="settings-row-icon">🌍</div>
-        <div class="settings-row-body">
-          <div class="settings-row-label">Voyage Travel Tracker</div>
-          <div class="settings-row-sub">All data stored locally on this device</div>
-        </div>
+  el.innerHTML = `
+    <div class="pad">
+      <div class="section-head" style="margin-bottom:20px">
+        <div class="section-title">⚙️ Settings</div>
       </div>
-      <div class="settings-row">
-        <div class="settings-row-icon">🔒</div>
-        <div class="settings-row-body">
-          <div class="settings-row-label">Privacy</div>
-          <div class="settings-row-sub">No account, no server, no tracking</div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Cloud Backup — Google Drive</div>
+        <div style="padding:14px 16px">
+          ${backupStatusHtml}
+          ${backupActionHtml}
         </div>
       </div>
-    </div>
-  </div>`;
+
+      <div class="settings-section">
+        <div class="settings-section-title">AI Email Import</div>
+        <div style="padding:14px 16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div style="font-size:14px;font-weight:500">Google Gemini API Key</div>
+            <span class="key-status ${key ? 'set' : 'unset'}">${key ? '✓ Key saved' : '✗ Not set'}</span>
+          </div>
+          ${apiKeyHtml}
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">About</div>
+        <div class="settings-row">
+          <div class="settings-row-icon">🌍</div>
+          <div class="settings-row-body">
+            <div class="settings-row-label">Voyage Travel Tracker</div>
+            <div class="settings-row-sub">All data stored locally on this device</div>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-icon">🔒</div>
+          <div class="settings-row-body">
+            <div class="settings-row-label">Privacy</div>
+            <div class="settings-row-sub">No account, no server, no tracking</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function copyConf(text, el) {
+  navigator.clipboard.writeText(text).then(() => {
+    el.classList.add('copied');
+    setTimeout(() => el.classList.remove('copied'), 500);
+    showToast('Copied!');
+  }).catch(() => showToast(text));
+}
 
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ─── API KEY ──────────────────────────────────────────────────────────────────
+function getApiKey() { return localStorage.getItem('voyage_gemini_key') || ''; }
+function setApiKey(k) { localStorage.setItem('voyage_gemini_key', k.trim()); }
+function clearApiKey() { localStorage.removeItem('voyage_gemini_key'); }
+
+function saveApiKey() {
+  const val = document.getElementById('api-key-field')?.value?.trim();
+  if (!val) { showToast('Please enter a key'); return; }
+  if (val.length < 20) { showToast('Key looks too short — check and try again'); return; }
+  setApiKey(val);
+  renderSettings();
+  showToast('\u2713 API key saved!');
+}
+
+function clearApiKeySetting() {
+  if (!confirm('Remove saved API key?')) return;
+  clearApiKey();
+  renderSettings();
+  showToast('Key removed');
+}
+
+// ─── GOOGLE DRIVE BACKUP ──────────────────────────────────────────────────────
+const BACKUP_FILENAME = 'voyage-backup.enc';
+
+async function getEncryptionKey() {
+  const raw = localStorage.getItem('voyage_enc_key');
+  if (raw) {
+    const keyData = JSON.parse(raw);
+    return await crypto.subtle.importKey('jwk', keyData, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+  }
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  const exported = await crypto.subtle.exportKey('jwk', key);
+  localStorage.setItem('voyage_enc_key', JSON.stringify(exported));
+  return key;
+}
+
+async function encryptData(data) {
+  const key = await getEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  const combined = new Uint8Array(iv.length + encrypted.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encrypted), iv.length);
+  return btoa(String.fromCharCode(...combined));
+}
+
+async function decryptData(base64) {
+  const key = await getEncryptionKey();
+  const combined = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const iv = combined.slice(0, 12);
+  const encrypted = combined.slice(12);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+  return JSON.parse(new TextDecoder().decode(decrypted));
+}
+
+function getGToken() { return localStorage.getItem('voyage_gtoken') || ''; }
+function getGTokenExpiry() { return parseInt(localStorage.getItem('voyage_gtoken_expiry') || '0'); }
+function isGTokenValid() { return !!(getGToken() && Date.now() < getGTokenExpiry()); }
+function clearGToken() { localStorage.removeItem('voyage_gtoken'); localStorage.removeItem('voyage_gtoken_expiry'); }
+function getGClientId() { return localStorage.getItem('voyage_gclient_id') || ''; }
+function setGClientId(id) { localStorage.setItem('voyage_gclient_id', id.trim()); }
+
+function connectGoogleDrive() {
+  const clientId = getGClientId();
+  if (!clientId) { showToast('Enter your Google Client ID first'); return; }
+  const redirectUri = window.location.origin + window.location.pathname;
+  const scope = 'https://www.googleapis.com/auth/drive.appdata';
+  const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=token&scope=' + encodeURIComponent(scope) + '&prompt=consent';
+  window.location.href = url;
+}
+
+function handleOAuthCallback() {
+  const hash = window.location.hash;
+  if (!hash.includes('access_token')) return;
+  const params = new URLSearchParams(hash.slice(1));
+  const token = params.get('access_token');
+  const expiresIn = parseInt(params.get('expires_in') || '3600');
+  if (token) {
+    localStorage.setItem('voyage_gtoken', token);
+    localStorage.setItem('voyage_gtoken_expiry', String(Date.now() + expiresIn * 1000));
+    window.history.replaceState({}, '', window.location.pathname);
+    showToast('\u2713 Google Drive connected!');
+    renderSettings();
+    triggerBackup();
+  }
+}
+
+let backupTimer = null;
+let backupStatus = 'disconnected';
+let lastBackupTime = null;
+
+function scheduleBackup() {
+  if (!isGTokenValid()) return;
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(triggerBackup, 1500);
+}
+
+async function triggerBackup() {
+  if (!isGTokenValid()) return;
+  backupStatus = 'syncing';
+  updateBackupStatusUI();
+  try {
+    const data = { trips: state.trips, currentTripId: state.currentTripId, backedUpAt: new Date().toISOString() };
+    const encrypted = await encryptData(data);
+    await uploadToDrive(encrypted);
+    backupStatus = 'synced';
+    lastBackupTime = new Date();
+    localStorage.setItem('voyage_last_backup', lastBackupTime.toISOString());
+  } catch (e) {
+    backupStatus = 'error';
+  }
+  updateBackupStatusUI();
+}
+
+async function uploadToDrive(content) {
+  const token = getGToken();
+  const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='" + BACKUP_FILENAME + "'&fields=files(id)", {
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  const searchData = await searchRes.json();
+  const existingId = searchData.files && searchData.files[0] ? searchData.files[0].id : null;
+  const blob = new Blob([content], { type: 'application/octet-stream' });
+  const metadata = existingId ? { name: BACKUP_FILENAME } : { name: BACKUP_FILENAME, parents: ['appDataFolder'] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', blob);
+  const url = existingId
+    ? 'https://www.googleapis.com/upload/drive/v3/files/' + existingId + '?uploadType=multipart'
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+  const res = await fetch(url, {
+    method: existingId ? 'PATCH' : 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+    body: form
+  });
+  if (!res.ok) throw new Error('Drive upload failed: ' + res.status);
+}
+
+async function restoreFromDrive() {
+  if (!isGTokenValid()) { showToast('Connect Google Drive first'); return; }
+  showToast('Restoring from backup…');
+  try {
+    const token = getGToken();
+    const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='" + BACKUP_FILENAME + "'&fields=files(id)", {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const searchData = await searchRes.json();
+    const fileId = searchData.files && searchData.files[0] ? searchData.files[0].id : null;
+    if (!fileId) { showToast('No backup found on Drive'); return; }
+    const dlRes = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const encrypted = await dlRes.text();
+    const data = await decryptData(encrypted);
+    if (data.trips) {
+      state.trips = data.trips;
+      state.currentTripId = data.currentTripId;
+      save();
+      render();
+      showToast('\u2713 Restored from backup!');
+      renderSettings();
+    }
+  } catch (e) {
+    showToast('Restore failed — ' + (e.message || 'unknown error'));
+  }
+}
+
+function updateBackupStatusUI() {
+  const el = document.getElementById('backup-status-indicator');
+  if (!el) return;
+  if (backupStatus === 'synced') {
+    const t = lastBackupTime ? lastBackupTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+    el.className = 'backup-status synced';
+    el.textContent = '\u2713 Backed up ' + t;
+  } else if (backupStatus === 'syncing') {
+    el.className = 'backup-status syncing';
+    el.innerHTML = '<div class="backup-spin"></div> Saving to Drive\u2026';
+  } else if (backupStatus === 'error') {
+    el.className = 'backup-status error';
+    el.textContent = '\u26a0\ufe0f Backup failed';
+  } else {
+    el.className = 'backup-status disconnected';
+    el.textContent = '\u2601\ufe0f Not connected';
+  }
+}
+
+// ─── EMAIL IMPORT ─────────────────────────────────────────────────────────────
 function openImportModal() {
   if (!currentTrip()) { showToast('Select or create a trip first'); return; }
   state.modalMode = 'import';
@@ -1027,12 +1257,12 @@ function renderImportStep1() {
     <div class="modal-body">
       <div class="form-field">
         <label class="form-label">Paste Email Content</label>
-        <textarea class="import-zone" id="email-paste" placeholder="Paste your confirmation email here — flight, hotel, car rental, activity booking...&#10;&#10;Just copy the full email text and paste it in. AI will find the confirmation number, dates, amounts, and everything else."></textarea>
+        <textarea class="import-zone" id="email-paste" placeholder="Paste your confirmation email here..."></textarea>
       </div>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="btn-save" onclick="extractEmail()" id="extract-btn">✨ Extract Details</button>
+      <button class="btn-save" onclick="extractEmail()">&#10024; Extract Details</button>
     </div>
     <div style="height:10px"></div>`;
   setTimeout(() => document.getElementById('email-paste')?.focus(), 350);
@@ -1042,64 +1272,32 @@ async function extractEmail() {
   const text = document.getElementById('email-paste')?.value?.trim();
   if (!text || text.length < 20) { showToast('Please paste an email first'); return; }
 
-  // Check for API key first
   const apiKey = getApiKey();
   if (!apiKey) {
     document.getElementById('modal-content').innerHTML = `
       <div class="modal-body">
-        <div class="import-error" style="font-size:14px;line-height:1.7">
-          <strong>API key required</strong><br/>
-          To use email import, you need a free Google Gemini API key.<br/><br/>
-          Tap <strong>Go to Settings</strong> below, then follow the instructions to get and save your key. Takes about 2 minutes.
-        </div>
+        <div class="import-error"><strong>API key required</strong><br/>Tap Go to Settings to add your free Gemini API key.</div>
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-        <button class="btn-save" onclick="closeModal();switchTab('settings')">Go to Settings →</button>
+        <button class="btn-save" onclick="closeModal();switchTab('settings')">Go to Settings &rarr;</button>
       </div>
       <div style="height:10px"></div>`;
     return;
   }
 
-  // Show loading state
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-body">
-      <div class="ai-extracting">
-        <div class="ai-spinner"></div>
-        <div>Reading your email and extracting details…</div>
-      </div>
+      <div class="ai-extracting"><div class="ai-spinner"></div><div>Reading your email and extracting details&hellip;</div></div>
       <div style="font-size:13px;color:var(--text3);text-align:center;padding:10px 0">This usually takes a few seconds</div>
     </div>`;
 
   try {
-    const prompt = `You are a travel booking parser. Extract reservation details from this confirmation email and return ONLY a JSON object with NO markdown, NO backticks, NO explanation.
+    const prompt = 'You are a travel booking parser. Extract reservation details from this confirmation email and return ONLY a JSON object with NO markdown, NO backticks, NO explanation.\n\nReturn this exact structure (use null for any field not found):\n{\n  "category": "flights" | "hotels" | "cars" | "activity" | "notes",\n  "title": "descriptive title",\n  "confirmation": "confirmation/booking number",\n  "status": "Confirmed" | "Pending" | "Cancelled",\n  "airline": "airline name or null",\n  "flightNum": "flight number or null",\n  "date": "YYYY-MM-DD or null",\n  "time": "HH:MM or null",\n  "startDate": "YYYY-MM-DD or null",\n  "endDate": "YYYY-MM-DD or null",\n  "location": "address or city or null",\n  "amount": "total with currency or null",\n  "notes": "extra info max 100 chars or null"\n}\n\nEMAIL:\n' + text.slice(0, 4000);
 
-Return this exact structure (use null for any field not found):
-{
-  "category": "flights" | "hotels" | "cars" | "activity" | "notes",
-  "title": "descriptive title (e.g. 'YYT → YYZ' for flight, hotel name, car company)",
-  "confirmation": "confirmation/booking/reservation number",
-  "status": "Confirmed" | "Pending" | "Cancelled",
-  "airline": "airline name (flights only, else null)",
-  "flightNum": "flight number (flights only, else null)",
-  "date": "YYYY-MM-DD (for single-date items like flights/activities)",
-  "time": "HH:MM (24h format, departure or check-in time)",
-  "startDate": "YYYY-MM-DD (for hotels/cars check-in or pickup)",
-  "endDate": "YYYY-MM-DD (for hotels/cars check-out or return)",
-  "location": "address, city, or venue name",
-  "amount": "total amount with currency symbol",
-  "notes": "any other relevant info: seat numbers, room type, special requests, etc (max 100 chars)"
-}
-
-EMAIL:
-${text.slice(0, 4000)}`;
-
-    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent', {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey
-      },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
@@ -1108,31 +1306,27 @@ ${text.slice(0, 4000)}`;
 
     if (res.status === 400 || res.status === 403) throw new Error('Invalid API key — check your key in Settings.');
     if (res.status === 429) throw new Error('Rate limit hit — wait a moment and try again.');
-    if (!res.ok) throw new Error(`API error ${res.status} — try again.`);
+    if (!res.ok) throw new Error('API error ' + res.status + ' — try again.');
 
     const data = await res.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    // Robustly extract JSON - handle markdown fences, extra text before/after
+    const raw = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) ? data.candidates[0].content.parts[0].text : '';
     let clean = raw.replace(/```json|```/gi, '').trim();
-    // Find the first { and last } to extract just the JSON object
     const jsonStart = clean.indexOf('{');
     const jsonEnd = clean.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) throw new Error('No JSON found in response — try again.');
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error('Could not parse response — try again.');
     clean = clean.slice(jsonStart, jsonEnd + 1);
     const extracted = JSON.parse(clean);
-
     state.importExtracted = extracted;
     renderImportPreview(extracted);
-
   } catch (err) {
-    const isKeyError = err.message?.includes('Invalid API key') || err.message?.includes('401');
+    const isKeyError = err.message && (err.message.includes('Invalid API key') || err.message.includes('403'));
     document.getElementById('modal-content').innerHTML = `
       <div class="modal-body">
-        <div class="import-error">⚠️ ${esc(err.message || 'Could not extract details. Try again.')}</div>
-        ${isKeyError ? `<div style="margin-top:8px"><button class="save-key-btn" style="background:var(--ink)" onclick="closeModal();switchTab('settings')">Check API Key in Settings →</button></div>` : ''}
+        <div class="import-error">&#9888;&#65039; ${esc(err.message || 'Could not extract details. Try again.')}</div>
+        ${isKeyError ? '<div style="margin-top:8px"><button class="save-key-btn" style="background:var(--ink)" onclick="closeModal();switchTab(&quot;settings&quot;)">Check API Key in Settings &rarr;</button></div>' : ''}
       </div>
       <div class="modal-actions">
-        <button class="btn-cancel" onclick="renderImportStep1()">← Try Again</button>
+        <button class="btn-cancel" onclick="renderImportStep1()">&larr; Try Again</button>
         <button class="btn-save" onclick="closeModal();openAddModal()">Add Manually</button>
       </div>
       <div style="height:10px"></div>`;
@@ -1140,7 +1334,7 @@ ${text.slice(0, 4000)}`;
 }
 
 function renderImportPreview(data) {
-  const catInfo = { flights:'✈️ Flight', hotels:'🏨 Hotel', cars:'🚗 Car Rental', activity:'🗺️ Activity', notes:'📝 Note' };
+  const catInfo = { flights:'\u2708\ufe0f Flight', hotels:'\u{1F3E8} Hotel', cars:'\u{1F697} Car Rental', activity:'\u{1F5FA}\ufe0f Activity', notes:'\u{1F4DD} Note' };
   const rows = [
     ['Type', catInfo[data.category] || data.category],
     ['Title', data.title],
@@ -1155,18 +1349,18 @@ function renderImportPreview(data) {
     data.location ? ['Location', data.location] : null,
     data.amount ? ['Amount', data.amount] : null,
     data.notes ? ['Notes', data.notes] : null,
-  ].filter(Boolean).filter(r => r[1] && r[1] !== 'null');
+  ].filter(function(r) { return r && r[1] && r[1] !== 'null'; });
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-body">
       <div class="extracted-preview">
-        <div class="extracted-label">✓ Details Extracted</div>
-        ${rows.map(([k,v]) => `<div class="extracted-row"><span class="extracted-key">${k}</span><span class="extracted-val">${esc(String(v))}</span></div>`).join('')}
+        <div class="extracted-label">&#10003; Details Extracted</div>
+        ${rows.map(function(r) { return '<div class="extracted-row"><span class="extracted-key">' + r[0] + '</span><span class="extracted-val">' + esc(String(r[1])) + '</span></div>'; }).join('')}
       </div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:4px">You can edit any details after saving.</div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="renderImportStep1()">← Re-paste</button>
+      <button class="btn-cancel" onclick="renderImportStep1()">&larr; Re-paste</button>
       <button class="btn-import-save" onclick="saveImported()">Add to Trip</button>
     </div>
     <div style="height:10px"></div>`;
@@ -1177,7 +1371,6 @@ function saveImported() {
   if (!data) return;
   const trip = currentTrip();
   if (!trip) return;
-
   const item = {
     id: uid(),
     category: data.category || 'notes',
@@ -1194,31 +1387,28 @@ function saveImported() {
     amount: data.amount || '',
     notes: data.notes || '',
   };
-
-  // Clean nulls
-  Object.keys(item).forEach(k => { if (item[k] === 'null' || item[k] === null) item[k] = ''; });
-
+  Object.keys(item).forEach(function(k) { if (item[k] === 'null' || item[k] === null) item[k] = ''; });
   trip.items = trip.items || [];
   trip.items.push(item);
   save();
-
-  // Switch to the right tab
   const tabMap = { flights:'flights', hotels:'hotels', cars:'cars', activity:'do', notes:'notes' };
   state.tab = tabMap[item.category] || 'overview';
-
   closeModal();
   render();
-  showToast('✓ Added from email!');
+  showToast('\u2713 Added from email!');
 }
 
-
+// ─── PWA ──────────────────────────────────────────────────────────────────────
 
 
 // ─── INIT ──────────────────────────────────────────────────────────────────────
 handleOAuthCallback();
 load();
-// Set initial backup status
-if (isGTokenValid()) { backupStatus = 'synced'; lastBackupTime = localStorage.getItem('voyage_last_backup') ? new Date(localStorage.getItem('voyage_last_backup')) : null; }
+if (isGTokenValid()) {
+  backupStatus = 'synced';
+  const lb = localStorage.getItem('voyage_last_backup');
+  lastBackupTime = lb ? new Date(lb) : null;
+}
 render();
 </script>
 </body>
